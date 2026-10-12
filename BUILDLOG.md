@@ -5,14 +5,14 @@
 (chat) before starting. During that planning the assistant's first transfer design claimed
 the idempotency key before locking accounts; running it against Postgres deadlocked, and
 the design was changed to lock first. I verified the fix in my own tests (test 7 / 10).
-**Stack:** _ (and why; result of the Go gate)
+**Stack:** Go (Go gate: Go was not installed; installed Go 1.27.0 via `winget install --id GoLang.Go`. Docker Compose v5.1.4 was already present.)
 
 ## Timeline
 
 | Clock | Milestone | Notes |
 | --- | --- | --- |
-| 0:00 | Start | |
-| | Skeleton green | |
+| 0:00 | Start | 2026-10-12 14:56 PDT |
+| 1:03 | Skeleton green | 2026-10-12 15:59 PDT. `go build`/`go vet` clean; `TestConnect` passes against real Postgres, including `-race` (run inside a `golang` container since no C compiler was available on the host yet — see below). |
 | | Accounts | |
 | | Transfer core | |
 | | Test 7 seen failing, restored | |
