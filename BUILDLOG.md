@@ -13,7 +13,7 @@ the design was changed to lock first. I verified the fix in my own tests (test 7
 | --- | --- | --- |
 | 0:00 | Start | 2026-10-12 14:56 PDT |
 | 1:03 | Skeleton green | 2026-10-12 15:59 PDT. `go build`/`go vet` clean; `TestConnect` passes against real Postgres, including `-race` (run inside a `golang` container since no C compiler was available on the host yet — see below). |
-| | Accounts | |
+| 1:09 | Accounts | 2026-10-12 16:05 PDT. POST /accounts, GET /accounts/{id}, error envelope. Tests 1 and 5 (account part) pass, incl. -race. |
 | | Transfer core | |
 | | Test 7 seen failing, restored | |
 | | Idempotency | |

@@ -8,6 +8,8 @@ import (
 	"os"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
+	"github.com/pranavsharma-dev/koho-interview/internal/api"
+	"github.com/pranavsharma-dev/koho-interview/internal/bank"
 )
 
 func main() {
@@ -39,7 +41,12 @@ func main() {
 		port = "8080"
 	}
 
+	store := bank.New(db)
+	h := api.New(store)
+
 	mux := http.NewServeMux()
+	mux.HandleFunc("POST /accounts", h.CreateAccount)
+	mux.HandleFunc("GET /accounts/{id}", h.GetAccount)
 
 	log.Printf("listening on :%s", port)
 	if err := http.ListenAndServe(":"+port, mux); err != nil {
