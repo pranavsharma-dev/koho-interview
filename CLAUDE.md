@@ -105,3 +105,13 @@ make test    # go test ./... -race -count=1
 ```
 
 DATABASE_URL defaults to `postgres://postgres:postgres@localhost:5432/bank?sslmode=disable`.
+
+## Session context (read first)
+
+- `PLAN.md`: phases and commits, with status. Work on the first unchecked phase only.
+- `INTERVIEW.md`: what I must be able to explain live. When you finish an increment, tell me
+  which questions from it that increment lets me answer, and quiz me on one before we move on.
+- `BUILDLOG.md`: I keep it. If something in the increment was wrong, risky or rejected, remind
+  me to log it in the same commit. Never write entries for me that did not happen.
+- Windows machine, Git Bash/PowerShell. Remote: github.com/pranavsharma-dev/koho-interview.
+- Coach me: explain the why behind each locking/SQL decision in plain words, keep diffs small.
