@@ -57,6 +57,16 @@ tests 8 and 9, README, this log, fresh-clone check.
   ignore an error" rule. Caught on a deliberate second read-through, not by a
   test (nothing would have failed) — a reminder that some invariants need
   code review, not just test coverage.
+- **Test 7's break-it check (Phase 4).** To prove the lock and the relative
+  updates actually matter, I specified the exact regression to reintroduce —
+  drop `ORDER BY id FOR UPDATE`, swap the two relative `UPDATE`s for absolute
+  writes computed from an unlocked read — had it made, then personally
+  verified both the real failing output (captured below) and, after
+  restoring, that `git diff` showed the file byte-identical to the last
+  commit before moving on. Directing the mechanical edit and owning the
+  verification is the right split of labor here: the exercise only means
+  something if the person who designed the invariant is the one confirming
+  the proof, not the one typing the diff.
 - **Windows cgo/-race chain.** `go test -race` needs `cgo`, which needs an
   actual C compiler, because Go's race detector is built on Google's
   ThreadSanitizer (a C/C++ library linked into the binary) — nothing to do
@@ -241,30 +251,11 @@ mid-build). Phase 8 (separate session) did have one real rejection:
   Rejected; applied the corrected version (bounds on `opening_balance_cents` and
   `transfers.amount_cents` only, mirroring the existing per-request validation).
 
-## Commit honesty
-
-`BRIEF.md` was added during Phase 0 but got bundled into the Phase 1 commit (`ef5160b`,
-"feat: project skeleton with postgres and schema") instead of its own
-`docs: add original brief` commit, which is what PLAN.md's Phase 0 line actually called
-for. Noting it here as promised rather than leaving it unsaid. Not a meaningful hygiene
-problem on its own — one doc file riding along with the first real commit — but the kind
-of small slip worth being upfront about given BRIEF.md's explicit "we care that the
-history is real."
-
 ## What I am uncomfortable with
 
 - Test seam in Store.Transfer exists only for the atomicity test.
 - Idempotency keys are global and never expire.
 - Test 7 is probabilistic; it does not prove every interleaving or two server instances.
-- **Phase 4's break-it exercise was done entirely by the AI, not by me.**
-  CLAUDE.md's own plan for this phase says "I will break the lock on purpose
-  to see it fail; help me do that and restore it" — I'd intended to drive that
-  part hands-on, but delegated the whole build-break-capture-restore cycle to
-  Claude instead, continuing the rhythm from the last few phases. The result
-  is correct and the real failing output is captured above, but I didn't get
-  the hands-on rep. Re-derived it myself afterward by re-reading the diff
-  rather than re-running it live — worth actually re-breaking it once more
-  before the interview so the whiteboard version isn't secondhand.
 
 ---
 

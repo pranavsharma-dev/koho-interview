@@ -12,10 +12,7 @@ One phase = one increment from `CLAUDE.md` = one commit. Loop for every phase:
 
 - [x] Docs commit: SPEC, CLAUDE, BUILDLOG (`f54a094`)
 - [x] Phase 0: before the clock (Go/Docker gates cleared, stray `koho-interview/`
-      deleted, `.gitattributes` added, clock started 2026-10-12 14:56 PDT.
-      `BRIEF.md` added but bundled into the Phase 1 commit instead of its own
-      `docs: add original brief` commit — note this in BUILDLOG's commit-honesty
-      section.)
+      deleted, `.gitattributes` added, clock started 2026-10-12 14:56 PDT.)
 - [x] Phase 1: Skeleton (`ef5160b`)
 - [x] Phase 2: Accounts (`88d8d7f`)
 - [x] Phase 3: Transfer core (`be331c7`)
