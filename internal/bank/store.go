@@ -21,6 +21,14 @@ type Transfer struct {
 	CreatedAt     time.Time
 }
 
+type Transaction struct {
+	TransferID            int64
+	Direction             string // "in" or "out", relative to the queried account
+	CounterpartyAccountID int64
+	AmountCents           int64
+	CreatedAt             time.Time
+}
+
 type Store struct {
 	db *sql.DB
 
@@ -52,6 +60,54 @@ func (s *Store) GetAccount(ctx context.Context, id int64) (balanceCents int64, e
 		return 0, ErrAccountNotFound
 	}
 	return balanceCents, err
+}
+
+func (s *Store) GetTransactionHistory(ctx context.Context, accountID int64) ([]Transaction, error) {
+	var exists bool
+	if err := s.db.QueryRowContext(ctx,
+		`SELECT EXISTS(SELECT 1 FROM accounts WHERE id = $1)`,
+		accountID,
+	).Scan(&exists); err != nil {
+		return nil, err
+	}
+	if !exists {
+		return nil, ErrAccountNotFound
+	}
+
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, from_account_id, to_account_id, amount_cents, created_at
+		 FROM transfers
+		 WHERE from_account_id = $1 OR to_account_id = $1
+		 ORDER BY id DESC`,
+		accountID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var txns []Transaction
+	for rows.Next() {
+		var id, fromID, toID, amount int64
+		var createdAt time.Time
+		if err := rows.Scan(&id, &fromID, &toID, &amount, &createdAt); err != nil {
+			return nil, err
+		}
+		txn := Transaction{TransferID: id, AmountCents: amount, CreatedAt: createdAt}
+		if fromID == accountID {
+			txn.Direction = "out"
+			txn.CounterpartyAccountID = toID
+		} else {
+			txn.Direction = "in"
+			txn.CounterpartyAccountID = fromID
+		}
+		txns = append(txns, txn)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return txns, nil
 }
 
 // Transfer locks both accounts (ORDER BY id, to avoid opposite-direction

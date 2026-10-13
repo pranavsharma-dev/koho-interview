@@ -18,7 +18,7 @@ the design was changed to lock first. I verified the fix in my own tests (test 7
 | 3:03 | Test 7 seen failing, restored | 2026-10-12 17:59 PDT. Broke the lock on purpose (removed ORDER BY/FOR UPDATE, switched to absolute writes), ran test 7 (50 iterations), saw it fail on 49/50. Restored; `git diff` confirmed byte-identical to the last commit; full suite green again incl. -race. |
 | 3:15 | Idempotency | 2026-10-12 18:11 PDT. `ON CONFLICT (idempotency_key) DO NOTHING RETURNING`, placed after the lock (not before — that's the exact mistake noted in "before the clock"). No-row case SELECTs the existing transfer and compares from/to/amount: match -> replay (200), mismatch -> ErrKeyReused (422). Tests 8, 9, 10 pass; test 7 re-ran green (no regression), incl. -race. |
 | 3:20 | Atomicity test | 2026-10-12 18:16 PDT. Unexported `midTransferHook func() error` on Store, nil in production, called between debit and credit. Test 11: injected failure -> both balances unchanged, no transfer row, key not consumed, same key then succeeds normally. Full suite incl. -race green, test 7 re-confirmed. |
-| | History | |
+| 3:31 | History | 2026-10-12 18:27 PDT. GET /accounts/{id}/transactions: 404 check via EXISTS, then ORDER BY id DESC with direction/counterparty computed relative to the queried account. Test 12 (newest-first, correct direction/counterparty/amount) plus a 404 case pass; full suite incl. -race green. |
 | | Adversarial review | |
 | | Docs, fresh-clone check | |
 
@@ -93,13 +93,29 @@ tests 8 and 9, README, this log, fresh-clone check.
   per-request context value instead. Worth saying out loud if asked "is
   this thread-safe" rather than letting "the race detector didn't complain"
   stand in for "I checked why."
+- **History query doesn't actually use its own indexes for the sort (Phase
+  7) — checked, not assumed.** `schema.sql` has `transfers_from_idx
+  (from_account_id, id)` and `transfers_to_idx (to_account_id, id)`,
+  seemingly set up so `ORDER BY id` comes pre-sorted from either index. But
+  the history endpoint needs *both* directions in one list
+  (`WHERE from_account_id = $1 OR to_account_id = $1`), and `OR` across two
+  different-column indexes can't preserve either index's row order. Ran
+  `EXPLAIN` against the real table to check rather than assume: Postgres
+  does a `BitmapOr` of both indexes (correct for the filter) followed by an
+  explicit `Sort` node (the indexes don't help with the `ORDER BY id DESC`
+  at all once combined). Not a correctness bug — just means these two
+  indexes are sized for "all transfers in one direction for one account,"
+  not for "this account's full history," which is the one query this
+  endpoint actually runs. Fine at this scale; a composite/covering index or
+  a UNION ALL of two indexed sub-queries would be the fix if history pages
+  got large. Good "what would you do with more time" answer.
 
 ## Where it was wrong and how I caught it
 
 (file, symptom, the test or reading that exposed it. Only real ones.)
 
 Nothing design- or code-wrong yet in the money-transfer logic itself (Phases
-1-5 implemented SPEC.md's already-detailed design faithfully — the two real
+1-7 implemented SPEC.md's already-detailed design faithfully — the two real
 issues above were both environment/process, not transfer correctness). Will
 log honestly here the moment something actually happens rather than invent a
 story for the interview.

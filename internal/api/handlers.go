@@ -100,6 +100,45 @@ func (h *Handler) GetAccount(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, accountResponse{ID: id, BalanceCents: balance})
 }
 
+type transactionResponse struct {
+	TransferID            int64     `json:"transfer_id"`
+	Direction             string    `json:"direction"`
+	CounterpartyAccountID int64     `json:"counterparty_account_id"`
+	AmountCents           int64     `json:"amount_cents"`
+	CreatedAt             time.Time `json:"created_at"`
+}
+
+func (h *Handler) GetAccountHistory(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "account_not_found", "account not found")
+		return
+	}
+
+	txns, err := h.store.GetTransactionHistory(r.Context(), id)
+	if errors.Is(err, bank.ErrAccountNotFound) {
+		writeError(w, http.StatusNotFound, "account_not_found", "account not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "internal error")
+		return
+	}
+
+	resp := make([]transactionResponse, 0, len(txns))
+	for _, txn := range txns {
+		resp = append(resp, transactionResponse{
+			TransferID:            txn.TransferID,
+			Direction:             txn.Direction,
+			CounterpartyAccountID: txn.CounterpartyAccountID,
+			AmountCents:           txn.AmountCents,
+			CreatedAt:             txn.CreatedAt,
+		})
+	}
+
+	writeJSON(w, http.StatusOK, resp)
+}
+
 type transferRequest struct {
 	FromAccountID int64 `json:"from_account_id"`
 	ToAccountID   int64 `json:"to_account_id"`

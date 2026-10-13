@@ -22,7 +22,8 @@ One phase = one increment from `CLAUDE.md` = one commit. Loop for every phase:
 - [x] Phase 4: Competing transfers, test 7 (break-it output in BUILDLOG.md)
 - [x] Phase 5: Idempotency (tests 8, 9, 10; test 7 regression-checked green)
 - [x] Phase 6: Atomicity test seam, test 11
-- [ ] Phase 7 .. 9 below
+- [x] Phase 7: History endpoint, test 12
+- [ ] Phase 8 .. 9 below
 
 ## Phase 0: before the clock
 

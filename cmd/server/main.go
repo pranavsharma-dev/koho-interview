@@ -47,6 +47,7 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /accounts", h.CreateAccount)
 	mux.HandleFunc("GET /accounts/{id}", h.GetAccount)
+	mux.HandleFunc("GET /accounts/{id}/transactions", h.GetAccountHistory)
 	mux.HandleFunc("POST /transfers", h.CreateTransfer)
 
 	log.Printf("listening on :%s", port)
