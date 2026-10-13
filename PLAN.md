@@ -23,7 +23,8 @@ One phase = one increment from `CLAUDE.md` = one commit. Loop for every phase:
 - [x] Phase 5: Idempotency (tests 8, 9, 10; test 7 regression-checked green)
 - [x] Phase 6: Atomicity test seam, test 11
 - [x] Phase 7: History endpoint, test 12
-- [ ] Phase 8 .. 9 below
+- [ ] Phase 8: Adversarial review (deferred to a fresh session, by design)
+- [x] Phase 9: README and wrap-up (fresh-clone check passed)
 
 ## Phase 0: before the clock
 

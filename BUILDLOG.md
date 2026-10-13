@@ -1,6 +1,15 @@
 # Build log
 
-**Total time:** _h _m (fill in at the end, honestly; say so if over four hours)
+**Total time:** 3h 37m clocked (14:56-18:33 PDT), under the 4-hour cap. Honest breakdown:
+roughly 1h30m of that (between the "Transfer core" and "Test 7" rows below) was environment
+setup, not feature work — installing Go, then discovering `-race` needs `cgo` needs an
+actual C compiler, installing a Windows GCC toolchain (slow: tens of thousands of tiny
+files, each scanned by Defender), and installing `make`. Worked around the slow GCC install
+by running `-race` in a disposable `golang` Docker container for the rest of the session
+rather than waiting on it. If I were doing this again on a machine I controlled, I'd
+pre-install Go/a C toolchain/Docker before starting the clock — all of Phase 0's "before the
+clock" checklist, which I partly skipped early on. That's the honest "what ate the time"
+answer, not padding the feature-work total.
 **Before the clock:** Planned stack, schema, transfer design and test strategy with Claude
 (chat) before starting. During that planning the assistant's first transfer design claimed
 the idempotency key before locking accounts; running it against Postgres deadlocked, and
@@ -19,8 +28,8 @@ the design was changed to lock first. I verified the fix in my own tests (test 7
 | 3:15 | Idempotency | 2026-10-12 18:11 PDT. `ON CONFLICT (idempotency_key) DO NOTHING RETURNING`, placed after the lock (not before — that's the exact mistake noted in "before the clock"). No-row case SELECTs the existing transfer and compares from/to/amount: match -> replay (200), mismatch -> ErrKeyReused (422). Tests 8, 9, 10 pass; test 7 re-ran green (no regression), incl. -race. |
 | 3:20 | Atomicity test | 2026-10-12 18:16 PDT. Unexported `midTransferHook func() error` on Store, nil in production, called between debit and credit. Test 11: injected failure -> both balances unchanged, no transfer row, key not consumed, same key then succeeds normally. Full suite incl. -race green, test 7 re-confirmed. |
 | 3:31 | History | 2026-10-12 18:27 PDT. GET /accounts/{id}/transactions: 404 check via EXISTS, then ORDER BY id DESC with direction/counterparty computed relative to the queried account. Test 12 (newest-first, correct direction/counterparty/amount) plus a 404 case pass; full suite incl. -race green. |
-| | Adversarial review | |
-| | Docs, fresh-clone check | |
+| | Adversarial review | Deferred to a fresh session, by design — see "What I am uncomfortable with." |
+| 3:37 | Docs, fresh-clone check | 2026-10-12 18:33 PDT. `git clone` into a scratch dir, own Postgres container, schema applied from scratch, full suite incl. -race green on the clean checkout. README written. This log finished. |
 
 ## Plan
 
@@ -166,7 +175,8 @@ showed the file byte-identical to the last commit; full suite re-ran green, incl
 
 ## What I rejected and why
 
-- 
+Nothing to log here honestly — no AI suggestion got overridden this session. Leaving
+this empty rather than inventing one; PLAN.md says that's more honest than padding it.
 
 ## What I am uncomfortable with
 
@@ -182,6 +192,12 @@ showed the file byte-identical to the last commit; full suite re-ran green, incl
   the hands-on rep. Re-derived it myself afterward by re-reading the diff
   rather than re-running it live — worth actually re-breaking it once more
   before the interview so the whiteboard version isn't secondhand.
+- **Phase 8 (adversarial review) has not happened yet as of this entry.**
+  PLAN.md calls for it in a fresh session, deliberately, so the review isn't
+  biased by having built everything myself in the same context — doing it
+  now would defeat the point. README and this log are being finished ahead
+  of that review rather than after, so if Phase 8 turns up something real,
+  both will need a follow-up pass.
 
 ---
 
