@@ -143,7 +143,7 @@ func (h *Handler) CreateTransfer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	transfer, err := h.store.Transfer(r.Context(), idempotencyKey, req.FromAccountID, req.ToAccountID, req.AmountCents)
+	transfer, replayed, err := h.store.Transfer(r.Context(), idempotencyKey, req.FromAccountID, req.ToAccountID, req.AmountCents)
 	switch {
 	case errors.Is(err, bank.ErrAccountNotFound):
 		writeError(w, http.StatusNotFound, "account_not_found", "account not found")
@@ -151,12 +151,19 @@ func (h *Handler) CreateTransfer(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, bank.ErrInsufficientFunds):
 		writeError(w, http.StatusConflict, "insufficient_funds", "insufficient funds")
 		return
+	case errors.Is(err, bank.ErrKeyReused):
+		writeError(w, http.StatusUnprocessableEntity, "idempotency_key_reused", "idempotency key already used with a different request")
+		return
 	case err != nil:
 		writeError(w, http.StatusInternalServerError, "internal", "internal error")
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, transferResponse{
+	status := http.StatusCreated
+	if replayed {
+		status = http.StatusOK
+	}
+	writeJSON(w, status, transferResponse{
 		ID:            transfer.ID,
 		FromAccountID: transfer.FromAccountID,
 		ToAccountID:   transfer.ToAccountID,

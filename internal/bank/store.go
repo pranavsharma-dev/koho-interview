@@ -10,6 +10,7 @@ import (
 var (
 	ErrAccountNotFound   = errors.New("account not found")
 	ErrInsufficientFunds = errors.New("insufficient funds")
+	ErrKeyReused         = errors.New("idempotency key reused with a different request")
 )
 
 type Transfer struct {
@@ -48,14 +49,23 @@ func (s *Store) GetAccount(ctx context.Context, id int64) (balanceCents int64, e
 }
 
 // Transfer locks both accounts (ORDER BY id, to avoid opposite-direction
-// deadlocks), inserts the transfer row, checks the sender's locked balance,
-// then applies relative debit/credit updates. Idempotency-key deduplication
-// is not implemented yet (Phase 5): a reused key currently surfaces as a
-// raw unique-constraint error.
-func (s *Store) Transfer(ctx context.Context, idempotencyKey string, fromID, toID, amountCents int64) (Transfer, error) {
+// deadlocks), then attempts to claim the idempotency key. If the key already
+// exists, it compares the existing transfer to this request: an identical
+// request returns the original (replayed=true, handler sends 200); a
+// different request returns ErrKeyReused (handler sends 422) without
+// touching any balance. Only a genuinely new key proceeds to the balance
+// check and relative debit/credit.
+//
+// Concurrent duplicates: a second request with the same key blocks on the
+// unique index until the first transaction concludes. If the first commits,
+// the second's INSERT is suppressed and it takes the replay/reuse path
+// above. If the first rolls back (e.g. insufficient funds), the key was
+// never actually claimed, so the second's INSERT succeeds and it proceeds
+// as a new transfer.
+func (s *Store) Transfer(ctx context.Context, idempotencyKey string, fromID, toID, amountCents int64) (transfer Transfer, replayed bool, err error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return Transfer{}, err
+		return Transfer{}, false, err
 	}
 	defer tx.Rollback()
 
@@ -64,54 +74,73 @@ func (s *Store) Transfer(ctx context.Context, idempotencyKey string, fromID, toI
 		fromID, toID,
 	)
 	if err != nil {
-		return Transfer{}, err
+		return Transfer{}, false, err
 	}
 	balances := make(map[int64]int64, 2)
 	for rows.Next() {
 		var id, balance int64
 		if err := rows.Scan(&id, &balance); err != nil {
 			rows.Close()
-			return Transfer{}, err
+			return Transfer{}, false, err
 		}
 		balances[id] = balance
 	}
 	if err := rows.Err(); err != nil {
-		return Transfer{}, err
+		return Transfer{}, false, err
 	}
 	if len(balances) < 2 {
-		return Transfer{}, ErrAccountNotFound
+		return Transfer{}, false, ErrAccountNotFound
 	}
 
 	var transferID int64
 	var createdAt time.Time
 	err = tx.QueryRowContext(ctx,
 		`INSERT INTO transfers (idempotency_key, from_account_id, to_account_id, amount_cents)
-		 VALUES ($1, $2, $3, $4) RETURNING id, created_at`,
+		 VALUES ($1, $2, $3, $4)
+		 ON CONFLICT (idempotency_key) DO NOTHING
+		 RETURNING id, created_at`,
 		idempotencyKey, fromID, toID, amountCents,
 	).Scan(&transferID, &createdAt)
+
+	if errors.Is(err, sql.ErrNoRows) {
+		// Key already claimed by an earlier (now-committed) transfer.
+		var existing Transfer
+		selErr := tx.QueryRowContext(ctx,
+			`SELECT id, from_account_id, to_account_id, amount_cents, created_at
+			 FROM transfers WHERE idempotency_key = $1`,
+			idempotencyKey,
+		).Scan(&existing.ID, &existing.FromAccountID, &existing.ToAccountID, &existing.AmountCents, &existing.CreatedAt)
+		if selErr != nil {
+			return Transfer{}, false, selErr
+		}
+		if existing.FromAccountID == fromID && existing.ToAccountID == toID && existing.AmountCents == amountCents {
+			return existing, true, nil
+		}
+		return Transfer{}, false, ErrKeyReused
+	}
 	if err != nil {
-		return Transfer{}, err
+		return Transfer{}, false, err
 	}
 
 	if balances[fromID] < amountCents {
-		return Transfer{}, ErrInsufficientFunds
+		return Transfer{}, false, ErrInsufficientFunds
 	}
 
 	if _, err := tx.ExecContext(ctx,
 		`UPDATE accounts SET balance_cents = balance_cents - $1 WHERE id = $2`,
 		amountCents, fromID,
 	); err != nil {
-		return Transfer{}, err
+		return Transfer{}, false, err
 	}
 	if _, err := tx.ExecContext(ctx,
 		`UPDATE accounts SET balance_cents = balance_cents + $1 WHERE id = $2`,
 		amountCents, toID,
 	); err != nil {
-		return Transfer{}, err
+		return Transfer{}, false, err
 	}
 
 	if err := tx.Commit(); err != nil {
-		return Transfer{}, err
+		return Transfer{}, false, err
 	}
 
 	return Transfer{
@@ -120,5 +149,5 @@ func (s *Store) Transfer(ctx context.Context, idempotencyKey string, fromID, toI
 		ToAccountID:   toID,
 		AmountCents:   amountCents,
 		CreatedAt:     createdAt,
-	}, nil
+	}, false, nil
 }
