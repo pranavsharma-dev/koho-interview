@@ -116,8 +116,7 @@ func (s *Store) GetTransactionHistory(ctx context.Context, accountID int64) ([]T
 // Transfer implements the mechanism in SPEC.md: lock both accounts (ORDER BY
 // id, to avoid opposite-direction deadlocks), claim the idempotency key via
 // INSERT ... ON CONFLICT, then debit/credit the locked balances. See
-// SPEC.md's "duplicate cases" table for the replay/reuse decision and
-// INTERVIEW.md for why each step is ordered this way.
+// SPEC.md's "duplicate cases" table for the replay/reuse decision.
 //
 // midTransferHook (nil in production) runs between the debit and credit;
 // test 11 uses it to prove a failure there rolls back both updates and the

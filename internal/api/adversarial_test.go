@@ -86,11 +86,12 @@ func TestTransferConcurrentSameKeyDisjointAccounts(t *testing.T) {
 	}
 }
 
-// Gap 2: INTERVIEW.md states "ORDER BY id" prevents opposite-direction
-// transfers from deadlocking, but no test ever actually fires A->B and B->A
-// at each other. If the lock order were wrong, Postgres would detect the
-// deadlock (error 40P01) and abort one side -- Store.Transfer has no special
-// handling for that error, so it would surface as a generic 500, not a
+// Gap 2: "ORDER BY id" is assumed to prevent opposite-direction transfers
+// from deadlocking (see SPEC.md's lock-ordering rationale), but no test ever
+// actually fires A->B and B->A at each other. If the lock order were wrong,
+// Postgres would detect the deadlock (error 40P01) and abort one side --
+// Store.Transfer has no special handling for that error, so it would
+// surface as a generic 500, not a
 // clean 201/409. This is SPEC.md's optional test 14, run for real with a
 // hard timeout so a true deadlock (which Postgres itself resolves in ~1s via
 // its deadlock_timeout, aborting one side) still shows up as a failure

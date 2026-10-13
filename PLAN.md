@@ -25,7 +25,7 @@ One phase = one increment from `CLAUDE.md` = one commit. Loop for every phase:
 - [x] Phase 7: History endpoint, test 12
 - [x] Phase 8: Adversarial review (separate session; findings in BUILDLOG.md's
       Phase 8 entries — two new tests, a `go.mod` version-floor fix, and a
-      `schema.sql` CHECK backstop; none committed yet, that's still mine to do)
+      `schema.sql` CHECK backstop; `8719c9b`, `f92eb94`, `e2d70ef`)
 - [x] Phase 9: README and wrap-up (fresh-clone check passed)
 
 ## Phase 0: before the clock

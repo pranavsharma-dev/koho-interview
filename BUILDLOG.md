@@ -128,11 +128,10 @@ tests 8 and 9, README, this log, fresh-clone check.
   thing under test. Added `TestTransferConcurrentSameKeyDisjointAccounts`
   (same key, two disjoint account pairs — nothing to serialize on but the
   index) to hit that path for real; passes. Same story for `ORDER BY id`
-  preventing opposite-direction deadlock: confidently stated in INTERVIEW.md,
-  never tested. Added `TestOppositeDirectionTransfersNoDeadlock` (SPEC's
-  optional test 14, 20 iterations with a timeout). Also passes. Both now in
-  `internal/api/adversarial_test.go` (not yet committed — see "uncomfortable
-  with" below).
+  preventing opposite-direction deadlock: confidently stated in interview
+  prep notes, never tested. Added `TestOppositeDirectionTransfersNoDeadlock`
+  (SPEC's optional test 14, 20 iterations with a timeout). Also passes. Both
+  now in `internal/api/adversarial_test.go` (`f92eb94`).
 - **`go.mod`'s version floor didn't match what the docs promised (Phase 8) —
   and my first fix made it worse.** `go.mod` declared `go 1.25.0`;
   `CLAUDE.md` and `README.md` both said "Go 1.22+". Since Go 1.21 the `go`
@@ -266,10 +265,6 @@ history is real."
   the hands-on rep. Re-derived it myself afterward by re-reading the diff
   rather than re-running it live — worth actually re-breaking it once more
   before the interview so the whiteboard version isn't secondhand.
-- **`internal/api/adversarial_test.go`, the `go.mod` fix, and the `schema.sql`
-  CHECK additions from Phase 8 are not committed as of this entry.** Reviewed,
-  tests pass, but committing after reading the diff is mine to do, per the
-  working agreement — not done automatically on my behalf.
 
 ---
 
