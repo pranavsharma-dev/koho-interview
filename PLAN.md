@@ -18,7 +18,9 @@ One phase = one increment from `CLAUDE.md` = one commit. Loop for every phase:
       section.)
 - [x] Phase 1: Skeleton (`ef5160b`)
 - [x] Phase 2: Accounts (`88d8d7f`)
-- [ ] Phase 3 .. 9 below
+- [x] Phase 3: Transfer core (`be331c7`)
+- [x] Phase 4: Competing transfers, test 7 (break-it output in BUILDLOG.md)
+- [ ] Phase 5 .. 9 below
 
 ## Phase 0: before the clock
 
