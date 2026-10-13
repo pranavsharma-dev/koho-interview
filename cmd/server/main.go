@@ -47,6 +47,7 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /accounts", h.CreateAccount)
 	mux.HandleFunc("GET /accounts/{id}", h.GetAccount)
+	mux.HandleFunc("POST /transfers", h.CreateTransfer)
 
 	log.Printf("listening on :%s", port)
 	if err := http.ListenAndServe(":"+port, mux); err != nil {

@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/pranavsharma-dev/koho-interview/internal/bank"
 )
@@ -97,4 +98,69 @@ func (h *Handler) GetAccount(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, accountResponse{ID: id, BalanceCents: balance})
+}
+
+type transferRequest struct {
+	FromAccountID int64 `json:"from_account_id"`
+	ToAccountID   int64 `json:"to_account_id"`
+	AmountCents   int64 `json:"amount_cents"`
+}
+
+type transferResponse struct {
+	ID            int64     `json:"id"`
+	FromAccountID int64     `json:"from_account_id"`
+	ToAccountID   int64     `json:"to_account_id"`
+	AmountCents   int64     `json:"amount_cents"`
+	CreatedAt     time.Time `json:"created_at"`
+}
+
+const maxIdempotencyKeyLen = 255
+
+func (h *Handler) CreateTransfer(w http.ResponseWriter, r *http.Request) {
+	idempotencyKey := r.Header.Get("Idempotency-Key")
+	if idempotencyKey == "" {
+		writeError(w, http.StatusBadRequest, "missing_idempotency_key", "Idempotency-Key header is required")
+		return
+	}
+	if len(idempotencyKey) > maxIdempotencyKeyLen {
+		writeError(w, http.StatusBadRequest, "invalid_request", "Idempotency-Key must be at most 255 characters")
+		return
+	}
+
+	var req transferRequest
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "invalid request body")
+		return
+	}
+	if req.AmountCents <= 0 || req.AmountCents > maxAmountCents {
+		writeError(w, http.StatusBadRequest, "invalid_request", "amount_cents must be between 1 and 10^12")
+		return
+	}
+	if req.FromAccountID == req.ToAccountID {
+		writeError(w, http.StatusBadRequest, "invalid_request", "from_account_id and to_account_id must differ")
+		return
+	}
+
+	transfer, err := h.store.Transfer(r.Context(), idempotencyKey, req.FromAccountID, req.ToAccountID, req.AmountCents)
+	switch {
+	case errors.Is(err, bank.ErrAccountNotFound):
+		writeError(w, http.StatusNotFound, "account_not_found", "account not found")
+		return
+	case errors.Is(err, bank.ErrInsufficientFunds):
+		writeError(w, http.StatusConflict, "insufficient_funds", "insufficient funds")
+		return
+	case err != nil:
+		writeError(w, http.StatusInternalServerError, "internal", "internal error")
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, transferResponse{
+		ID:            transfer.ID,
+		FromAccountID: transfer.FromAccountID,
+		ToAccountID:   transfer.ToAccountID,
+		AmountCents:   transfer.AmountCents,
+		CreatedAt:     transfer.CreatedAt,
+	})
 }

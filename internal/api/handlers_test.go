@@ -37,6 +37,7 @@ func newTestServer(t *testing.T) (*httptest.Server, *sql.DB) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /accounts", h.CreateAccount)
 	mux.HandleFunc("GET /accounts/{id}", h.GetAccount)
+	mux.HandleFunc("POST /transfers", h.CreateTransfer)
 
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
@@ -51,6 +52,54 @@ func postJSON(t *testing.T, url string, body string) *http.Response {
 		t.Fatalf("post: %v", err)
 	}
 	return resp
+}
+
+func postTransfer(t *testing.T, srv *httptest.Server, idempotencyKey, body string) *http.Response {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodPost, srv.URL+"/transfers", bytes.NewBufferString(body))
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if idempotencyKey != "" {
+		req.Header.Set("Idempotency-Key", idempotencyKey)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("do: %v", err)
+	}
+	return resp
+}
+
+func createAccount(t *testing.T, srv *httptest.Server, startingBalanceCents int64) int64 {
+	t.Helper()
+	resp := postJSON(t, srv.URL+"/accounts", fmt.Sprintf(`{"starting_balance_cents":%d}`, startingBalanceCents))
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("create account: expected 201, got %d", resp.StatusCode)
+	}
+	var created accountResponse
+	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
+		t.Fatalf("decode create account response: %v", err)
+	}
+	return created.ID
+}
+
+func getBalance(t *testing.T, srv *httptest.Server, id int64) int64 {
+	t.Helper()
+	resp, err := http.Get(fmt.Sprintf("%s/accounts/%d", srv.URL, id))
+	if err != nil {
+		t.Fatalf("get account: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("get account: expected 200, got %d", resp.StatusCode)
+	}
+	var acc accountResponse
+	if err := json.NewDecoder(resp.Body).Decode(&acc); err != nil {
+		t.Fatalf("decode get account response: %v", err)
+	}
+	return acc.BalanceCents
 }
 
 // Test 1: create and read an account.
