@@ -74,6 +74,9 @@ func (s *Store) GetTransactionHistory(ctx context.Context, accountID int64) ([]T
 		return nil, ErrAccountNotFound
 	}
 
+	// Separate existence check because the query below alone can't tell
+	// "account exists, no transfers yet" (200, empty list) apart from
+	// "account doesn't exist" (404) -- both return zero rows.
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT id, from_account_id, to_account_id, amount_cents, created_at
 		 FROM transfers
@@ -110,20 +113,11 @@ func (s *Store) GetTransactionHistory(ctx context.Context, accountID int64) ([]T
 	return txns, nil
 }
 
-// Transfer locks both accounts (ORDER BY id, to avoid opposite-direction
-// deadlocks), then attempts to claim the idempotency key. If the key already
-// exists, it compares the existing transfer to this request: an identical
-// request returns the original (replayed=true, handler sends 200); a
-// different request returns ErrKeyReused (handler sends 422) without
-// touching any balance. Only a genuinely new key proceeds to the balance
-// check and relative debit/credit.
-//
-// Concurrent duplicates: a second request with the same key blocks on the
-// unique index until the first transaction concludes. If the first commits,
-// the second's INSERT is suppressed and it takes the replay/reuse path
-// above. If the first rolls back (e.g. insufficient funds), the key was
-// never actually claimed, so the second's INSERT succeeds and it proceeds
-// as a new transfer.
+// Transfer implements the mechanism in SPEC.md: lock both accounts (ORDER BY
+// id, to avoid opposite-direction deadlocks), claim the idempotency key via
+// INSERT ... ON CONFLICT, then debit/credit the locked balances. See
+// SPEC.md's "duplicate cases" table for the replay/reuse decision and
+// INTERVIEW.md for why each step is ordered this way.
 //
 // midTransferHook (nil in production) runs between the debit and credit;
 // test 11 uses it to prove a failure there rolls back both updates and the

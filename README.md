@@ -6,7 +6,7 @@ design this implementation follows.
 
 ## Running it
 
-Prerequisites: Go 1.22+, Docker Desktop.
+Prerequisites: Go 1.25+ (the floor `jackc/pgx/v5` itself requires), Docker Desktop.
 
 ```
 make db      # docker compose up -d --wait, then applies schema.sql via psql

@@ -34,6 +34,56 @@ The hard part is concurrency, so I lock first, check on the locked row, and use 
 - Test 7 is probabilistic: not every interleaving, not two server instances.
 - No auth, pagination, multi-currency, ledger, outbox. Listed as out of scope in the README.
 - Single Postgres node. Cross-service atomicity would need an outbox or workflow engine.
+- No `SetMaxOpenConns`/`SetMaxIdleConns` tuning, and no retry/backoff on transient DB
+  errors (e.g. "too many clients") — a raw 500 surfaces instead. Haven't needed to tune
+  this at this scale; know it, don't pretend it's handled.
+
+## Live-change picks: which ones are actually harder than they look
+
+From the "predict live-change requests" list below, the three most likely for a
+Subscriptions-team interviewer — fee, key expiry, per-client scoping — are each more
+work than "which file, which SQL" implies. Know the real friction *before* being asked
+live, not while being asked:
+
+- **Add a fee.** `Store.Transfer`'s lock query is hardcoded to exactly two rows
+  (`WHERE id IN ($1, $2)`). A fee leg is a third account balance mutation inside the
+  same tx, so the two-row lock pattern needs generalizing, not just one more `UPDATE`.
+  Also: no migration tool (CLAUDE.md), and `schema.sql` is applied via
+  `CREATE TABLE IF NOT EXISTS` — adding a `fee_cents` column needs a hand-written
+  `ALTER TABLE` that won't retroactively apply without recreating the DB. This is where
+  the "no migration tool" tradeoff stops being hypothetical.
+- **Expire idempotency keys after 24h.** `idempotency_key` is a plain DB-level `UNIQUE`
+  constraint with no time dimension. "Expire after 24h" isn't a one-line `WHERE` added
+  to the replay-lookup SELECT — the `UNIQUE` constraint itself still blocks reinserting
+  an expired key's value. Needs either a cleanup job deleting expired rows, or turning it
+  into a partial/expression unique index. More schema surgery than it sounds.
+- **Scope keys per client.** Same `ALTER TABLE` problem, plus the constraint becomes
+  composite (`UNIQUE(client_id, idempotency_key)`), not just an added column.
+- **By contrast, `GET /transfers/{id}` really is easy** — mirrors `GetAccount` almost
+  exactly, no schema change. Good one if a warm-up before a harder pick is offered.
+
+## Questions not already answered above
+
+- **Why Postgres over SQLite, really?** README answers "why Postgres" at the surface
+  level; the sharper follow-up is "doesn't SQLite's `BEGIN IMMEDIATE` also lock?" — yes,
+  but it's one write lock for the *whole database*, not per-row. SQLite would serialize
+  every transfer process-wide, not just the ones actually contending for the same
+  accounts. That's the real distinction, not just "Postgres is a real database."
+- **What's the migration story given no migration tool?** Honest answer: hand-run
+  `ALTER`s against `schema.sql` plus a fresh `CREATE TABLE IF NOT EXISTS` apply on boot —
+  fine for a take-home, not what I'd ship for a team iterating on schema weekly. Know
+  this is a real gap, not a non-answer.
+- **How would you load-test this?** Nothing exists today — test 7 is 2 goroutines x 50
+  iterations, which proves correctness, not throughput. Would reach for `pgbench` against
+  the DB directly or `k6`/`hey` against the HTTP layer at real concurrency.
+- **The commit-succeeds-but-the-response-never-arrives scenario** (classic idempotency
+  edge case): `Store.Transfer` commits the DB transaction *before* the handler writes the
+  HTTP response. If that write fails or the client times out waiting, the transfer is
+  already durable. A client retry with the same key hits the `ON CONFLICT` no-row branch,
+  compares from/to/amount, matches, and correctly replays with 200 (not 201, since this
+  one didn't originate the transfer). Traced this for real — it's correct as built. Worth
+  bringing up proactively rather than waiting to be asked, since nothing currently says so
+  anywhere else in these docs.
 
 ## What to say about AI
 
@@ -55,3 +105,10 @@ The hard part is concurrency, so I lock first, check on the locked row, and use 
 - [ ] Be ready to answer "what would you do with another day?" (lock-holder test, key expiry,
       ledger table, metrics).
 - [ ] Run a fresh clone and `make db && make test` the day before.
+- [ ] Commit Phase 8's work (`internal/api/adversarial_test.go`, the `go.mod` fix, the
+      `schema.sql` CHECK additions, and the BUILDLOG/PLAN/INTERVIEW doc updates) after
+      reading the diff — not done yet as of this entry.
+- [ ] Reproduce the Phase 8 `EXPLAIN` finding live: remove `ORDER BY id`, watch the
+      opposite-direction deadlock test still pass, then run `EXPLAIN` to show *why*
+      (ascending index scan on the PK, independent of `ORDER BY`, at this table size) —
+      good answer if asked "how do you know your test actually proves what it claims?"

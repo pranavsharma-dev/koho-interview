@@ -23,12 +23,14 @@ One phase = one increment from `CLAUDE.md` = one commit. Loop for every phase:
 - [x] Phase 5: Idempotency (tests 8, 9, 10; test 7 regression-checked green)
 - [x] Phase 6: Atomicity test seam, test 11
 - [x] Phase 7: History endpoint, test 12
-- [ ] Phase 8: Adversarial review (deferred to a fresh session, by design)
+- [x] Phase 8: Adversarial review (separate session; findings in BUILDLOG.md's
+      Phase 8 entries — two new tests, a `go.mod` version-floor fix, and a
+      `schema.sql` CHECK backstop; none committed yet, that's still mine to do)
 - [x] Phase 9: README and wrap-up (fresh-clone check passed)
 
 ## Phase 0: before the clock
 
-- Install Go 1.22+ (`go version`) and start Docker Desktop (`docker compose version`).
+- Install Go 1.25+ (`go version`) and start Docker Desktop (`docker compose version`).
   This is the "Go gate" in the build log. If Go is a problem, switch `STACK` in CLAUDE.md to Python.
 - Add `BRIEF.md` (KOHO's original assignment). CLAUDE.md says it wins over SPEC.md.
   Read it against SPEC.md and write down any conflict before coding.

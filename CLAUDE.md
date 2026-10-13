@@ -13,7 +13,7 @@ disagree, `BRIEF.md` wins: tell me about the conflict, do not resolve it silentl
 
 STACK: Go   <!-- change to Python if I switch; see "Python variant" below -->
 
-- Go 1.22+, standard library `net/http` (Go 1.22 pattern routing), `database/sql` with the
+- Go 1.25+ (pgx/v5's own go.mod requires it), standard library `net/http` (Go 1.22 pattern routing), `database/sql` with the
   pgx stdlib driver (`github.com/jackc/pgx/v5/stdlib`)
 - PostgreSQL 16 via Docker Compose
 - No ORM, no router library, no migration tool, no config framework, no logging library

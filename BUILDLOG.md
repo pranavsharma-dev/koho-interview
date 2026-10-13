@@ -23,13 +23,14 @@ the design was changed to lock first. I verified the fix in my own tests (test 7
 | 0:00 | Start | 2026-10-12 14:56 PDT |
 | 1:03 | Skeleton green | 2026-10-12 15:59 PDT. `go build`/`go vet` clean; `TestConnect` passes against real Postgres, including `-race` (run inside a `golang` container since no C compiler was available on the host yet — see below). |
 | 1:09 | Accounts | 2026-10-12 16:05 PDT. POST /accounts, GET /accounts/{id}, error envelope. Tests 1 and 5 (account part) pass, incl. -race. |
-| 1:28 | Transfer core | 2026-10-12 16:24 PDT. Store.Transfer: lock both rows ORDER BY id FOR UPDATE, insert transfer row, check locked balance, relative debit/credit. No idempotency dedup yet (Phase 5). Tests 2-6 pass, incl. -race. |
+| 1:28 | Transfer core | 2026-10-12 16:24 PDT. Store.Transfer: lock both rows ORDER BY id FOR UPDATE, insert transfer row, check locked balance, relative debit/credit. No idempotency dedup yet (Phase 5). Tests 2-6 pass, incl. -race. Code and tests were green at this clock mark; the commit itself (`be331c7`) is timestamped 17:50 PDT, after the GCC detour below — held off committing until `-race` could actually run against it. |
 | 3:03 | Test 7 seen failing, restored | 2026-10-12 17:59 PDT. Broke the lock on purpose (removed ORDER BY/FOR UPDATE, switched to absolute writes), ran test 7 (50 iterations), saw it fail on 49/50. Restored; `git diff` confirmed byte-identical to the last commit; full suite green again incl. -race. |
 | 3:15 | Idempotency | 2026-10-12 18:11 PDT. `ON CONFLICT (idempotency_key) DO NOTHING RETURNING`, placed after the lock (not before — that's the exact mistake noted in "before the clock"). No-row case SELECTs the existing transfer and compares from/to/amount: match -> replay (200), mismatch -> ErrKeyReused (422). Tests 8, 9, 10 pass; test 7 re-ran green (no regression), incl. -race. |
 | 3:20 | Atomicity test | 2026-10-12 18:16 PDT. Unexported `midTransferHook func() error` on Store, nil in production, called between debit and credit. Test 11: injected failure -> both balances unchanged, no transfer row, key not consumed, same key then succeeds normally. Full suite incl. -race green, test 7 re-confirmed. |
 | 3:31 | History | 2026-10-12 18:27 PDT. GET /accounts/{id}/transactions: 404 check via EXISTS, then ORDER BY id DESC with direction/counterparty computed relative to the queried account. Test 12 (newest-first, correct direction/counterparty/amount) plus a 404 case pass; full suite incl. -race green. |
-| | Adversarial review | Deferred to a fresh session, by design — see "What I am uncomfortable with." |
+| | Adversarial review | Deferred to a fresh session, by design — see Phase 8 entries below. |
 | 3:37 | Docs, fresh-clone check | 2026-10-12 18:33 PDT. `git clone` into a scratch dir, own Postgres container, schema applied from scratch, full suite incl. -race green on the clean checkout. README written. This log finished. |
+| — | Phase 8: Adversarial review | 2026-10-12, separate fresh-context session (by design — PLAN.md calls for this so the review isn't biased by having built everything myself), ending 19:22 PDT. Findings below. |
 
 ## Plan
 
@@ -118,18 +119,73 @@ tests 8 and 9, README, this log, fresh-clone check.
   endpoint actually runs. Fine at this scale; a composite/covering index or
   a UNION ALL of two indexed sub-queries would be the fix if history pages
   got large. Good "what would you do with more time" answer.
+- **Two real coverage gaps, found by trying to exercise mechanisms that were
+  only ever asserted, not tested (Phase 8).** Test 10 (ten goroutines, one
+  key, one account pair) is dominated by the `FOR UPDATE` row lock — every
+  goroutine serializes on that before the unique index on `idempotency_key`
+  ever matters, so the "concurrent duplicates wait on the unique index"
+  mechanism SPEC.md's duplicate-cases table describes was never actually the
+  thing under test. Added `TestTransferConcurrentSameKeyDisjointAccounts`
+  (same key, two disjoint account pairs — nothing to serialize on but the
+  index) to hit that path for real; passes. Same story for `ORDER BY id`
+  preventing opposite-direction deadlock: confidently stated in INTERVIEW.md,
+  never tested. Added `TestOppositeDirectionTransfersNoDeadlock` (SPEC's
+  optional test 14, 20 iterations with a timeout). Also passes. Both now in
+  `internal/api/adversarial_test.go` (not yet committed — see "uncomfortable
+  with" below).
+- **`go.mod`'s version floor didn't match what the docs promised (Phase 8) —
+  and my first fix made it worse.** `go.mod` declared `go 1.25.0`;
+  `CLAUDE.md` and `README.md` both said "Go 1.22+". Since Go 1.21 the `go`
+  directive is a hard build-time floor, not a hint, so this was a real gap —
+  a reviewer with Go 1.22-1.24 would've hit a build error the docs said
+  wouldn't happen. First instinct was to lower `go.mod` to `1.22` to match
+  the docs. `go mod tidy` immediately reverted it back to `1.25.0` on its
+  own — turns out `github.com/jackc/pgx/v5@v5.11.0` (our actual Postgres
+  driver, not a stray transitive dep) declares `go 1.25.0` in its own
+  `go.mod`, and Go's module graph takes the max floor across all
+  dependencies. `1.22` was never actually achievable here. Correct fix was
+  the opposite direction: bumped `CLAUDE.md`, `README.md`, and `PLAN.md` to
+  say "Go 1.25+" to match the real, enforced floor. Good reminder that
+  "the docs and the code disagree" doesn't tell you which one is wrong —
+  checking who actually enforces the constraint before "fixing" it both
+  ways would have cost nothing and I nearly skipped it.
 
 ## Where it was wrong and how I caught it
 
 (file, symptom, the test or reading that exposed it. Only real ones.)
 
-Nothing design- or code-wrong yet in the money-transfer logic itself (Phases
-1-7 implemented SPEC.md's already-detailed design faithfully — the two real
-issues above were both environment/process, not transfer correctness). Will
-log honestly here the moment something actually happens rather than invent a
-story for the interview.
+Nothing design- or code-wrong in the money-transfer logic during the
+original build (Phases 1-7 implemented SPEC.md's already-detailed design
+faithfully). Phase 8, below, is where real findings showed up.
 
-- 
+- **A break-it test that didn't actually break (Phase 8).** To sanity-check
+  the new opposite-direction-deadlock test, I removed `ORDER BY id` from the
+  lock query in `Store.Transfer` and re-ran it — same discipline as the Test
+  7 break-it check. It kept passing. Before writing that off as "the test is
+  weak," I checked why with `EXPLAIN`: Postgres's planner picks an `Index
+  Scan` on `accounts_pkey` for this query regardless of `ORDER BY`, and that
+  scan happens to emit ascending-id order either way at this table size — so
+  removing the clause didn't change observed behavior today. Confirmed with
+  `SET enable_indexscan = off` that this really is a planner artifact, not a
+  SQL guarantee: nothing requires ascending order without an explicit
+  `ORDER BY`. The code is correct and `ORDER BY id` stays — it's the only
+  real guarantee — but my first attempt at proving that with a break-it test
+  proved nothing. Logging this so "I broke it and watched it fail" doesn't
+  get reused as evidence for a claim it didn't actually test.
+- **A review pass's own suggested fix would have introduced a real bug
+  (Phase 8).** While adding DB-level upper-bound backstops for the 10^12
+  amount cap (matching SPEC.md's own philosophy — CHECK constraints back up
+  the lock/validation logic, they don't replace it — and the existing lower
+  bounds already in `schema.sql`), a suggestion came back to add
+  `CHECK (balance_cents <= 1000000000000)` directly on `accounts.balance_cents`.
+  That's wrong: `balance_cents` is a cumulative running total, not a single
+  request's input — a legitimately busy account can exceed 10^12 cents after
+  enough separately-valid incoming transfers. That CHECK would eventually
+  reject a real, correct credit update with an opaque constraint-violation
+  error instead of ever applying. Caught it before touching `schema.sql`;
+  applied the corrected version instead — bounds only on the two actual
+  single-request inputs the cap is meant to validate,
+  `opening_balance_cents` and `transfers.amount_cents`.
 
 ## Test 7 break-it result
 
@@ -175,8 +231,26 @@ showed the file byte-identical to the last commit; full suite re-ran green, incl
 
 ## What I rejected and why
 
-Nothing to log here honestly — no AI suggestion got overridden this session. Leaving
-this empty rather than inventing one; PLAN.md says that's more honest than padding it.
+Nothing during the original build session — no AI suggestion got overridden before any
+commit (the idempotency-before-lock design error under "Before the clock" was caught and
+changed during planning, before the clock started, so there was nothing left to reject
+mid-build). Phase 8 (separate session) did have one real rejection:
+
+- **A suggested `CHECK (balance_cents <= 1000000000000)` on `accounts`.** Covered above
+  under "Where it was wrong" — would have capped a cumulative running total at a
+  single-transaction bound, eventually rejecting legitimate high-volume accounts.
+  Rejected; applied the corrected version (bounds on `opening_balance_cents` and
+  `transfers.amount_cents` only, mirroring the existing per-request validation).
+
+## Commit honesty
+
+`BRIEF.md` was added during Phase 0 but got bundled into the Phase 1 commit (`ef5160b`,
+"feat: project skeleton with postgres and schema") instead of its own
+`docs: add original brief` commit, which is what PLAN.md's Phase 0 line actually called
+for. Noting it here as promised rather than leaving it unsaid. Not a meaningful hygiene
+problem on its own — one doc file riding along with the first real commit — but the kind
+of small slip worth being upfront about given BRIEF.md's explicit "we care that the
+history is real."
 
 ## What I am uncomfortable with
 
@@ -192,12 +266,10 @@ this empty rather than inventing one; PLAN.md says that's more honest than paddi
   the hands-on rep. Re-derived it myself afterward by re-reading the diff
   rather than re-running it live — worth actually re-breaking it once more
   before the interview so the whiteboard version isn't secondhand.
-- **Phase 8 (adversarial review) has not happened yet as of this entry.**
-  PLAN.md calls for it in a fresh session, deliberately, so the review isn't
-  biased by having built everything myself in the same context — doing it
-  now would defeat the point. README and this log are being finished ahead
-  of that review rather than after, so if Phase 8 turns up something real,
-  both will need a follow-up pass.
+- **`internal/api/adversarial_test.go`, the `go.mod` fix, and the `schema.sql`
+  CHECK additions from Phase 8 are not committed as of this entry.** Reviewed,
+  tests pass, but committing after reading the diff is mine to do, per the
+  working agreement — not done automatically on my behalf.
 
 ---
 
