@@ -23,6 +23,12 @@ type Transfer struct {
 
 type Store struct {
 	db *sql.DB
+
+	// midTransferHook is called between the debit and credit updates, inside
+	// the transaction. Nil in production; tests use it to inject a failure
+	// and prove the transaction rolls back atomically (test 11). Unexported
+	// so it never appears in Store's public API.
+	midTransferHook func() error
 }
 
 func New(db *sql.DB) *Store {
@@ -62,6 +68,10 @@ func (s *Store) GetAccount(ctx context.Context, id int64) (balanceCents int64, e
 // above. If the first rolls back (e.g. insufficient funds), the key was
 // never actually claimed, so the second's INSERT succeeds and it proceeds
 // as a new transfer.
+//
+// midTransferHook (nil in production) runs between the debit and credit;
+// test 11 uses it to prove a failure there rolls back both updates and the
+// transfer row, leaving the key unconsumed.
 func (s *Store) Transfer(ctx context.Context, idempotencyKey string, fromID, toID, amountCents int64) (transfer Transfer, replayed bool, err error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -132,6 +142,13 @@ func (s *Store) Transfer(ctx context.Context, idempotencyKey string, fromID, toI
 	); err != nil {
 		return Transfer{}, false, err
 	}
+
+	if s.midTransferHook != nil {
+		if err := s.midTransferHook(); err != nil {
+			return Transfer{}, false, err
+		}
+	}
+
 	if _, err := tx.ExecContext(ctx,
 		`UPDATE accounts SET balance_cents = balance_cents + $1 WHERE id = $2`,
 		amountCents, toID,

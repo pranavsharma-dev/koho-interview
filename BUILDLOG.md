@@ -17,7 +17,7 @@ the design was changed to lock first. I verified the fix in my own tests (test 7
 | 1:28 | Transfer core | 2026-10-12 16:24 PDT. Store.Transfer: lock both rows ORDER BY id FOR UPDATE, insert transfer row, check locked balance, relative debit/credit. No idempotency dedup yet (Phase 5). Tests 2-6 pass, incl. -race. |
 | 3:03 | Test 7 seen failing, restored | 2026-10-12 17:59 PDT. Broke the lock on purpose (removed ORDER BY/FOR UPDATE, switched to absolute writes), ran test 7 (50 iterations), saw it fail on 49/50. Restored; `git diff` confirmed byte-identical to the last commit; full suite green again incl. -race. |
 | 3:15 | Idempotency | 2026-10-12 18:11 PDT. `ON CONFLICT (idempotency_key) DO NOTHING RETURNING`, placed after the lock (not before — that's the exact mistake noted in "before the clock"). No-row case SELECTs the existing transfer and compares from/to/amount: match -> replay (200), mismatch -> ErrKeyReused (422). Tests 8, 9, 10 pass; test 7 re-ran green (no regression), incl. -race. |
-| | Atomicity test | |
+| 3:20 | Atomicity test | 2026-10-12 18:16 PDT. Unexported `midTransferHook func() error` on Store, nil in production, called between debit and credit. Test 11: injected failure -> both balances unchanged, no transfer row, key not consumed, same key then succeeds normally. Full suite incl. -race green, test 7 re-confirmed. |
 | | History | |
 | | Adversarial review | |
 | | Docs, fresh-clone check | |
@@ -80,6 +80,19 @@ tests 8 and 9, README, this log, fresh-clone check.
   `ON CONFLICT DO NOTHING` sees zero rows, the conflicting transaction is
   guaranteed already committed, not just in-flight — otherwise our own
   INSERT would have gone through instead).
+- **The test seam isn't actually thread-safe, and that's fine (Phase 6).**
+  `midTransferHook` is an unexported, unsynchronized function field on
+  `*Store`. Mutating a shared struct field without a lock while other
+  goroutines might be reading it is exactly the kind of thing `-race` exists
+  to catch. It stayed clean here only because test 11 deliberately
+  constructs its own private `Store` instance rather than reusing the
+  `httptest`-backed shared one that the concurrency tests (7, 10) hit — so
+  there's never a second goroutine touching that field. If I ever needed to
+  inject a failure into a `Store` already serving concurrent traffic, this
+  field wouldn't be safe as-is; I'd want an atomic pointer swap or a
+  per-request context value instead. Worth saying out loud if asked "is
+  this thread-safe" rather than letting "the race detector didn't complain"
+  stand in for "I checked why."
 
 ## Where it was wrong and how I caught it
 
